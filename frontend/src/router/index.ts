@@ -5,6 +5,7 @@ const Station = () => import('@/views/station/index.vue')
 const Sensor = () => import('@/views/sensor/index.vue')
 const Observation = () => import('@/views/observation/index.vue')
 const Quality = () => import('@/views/quality/index.vue')
+const QualityDetail = () => import('@/views/quality/detail.vue')
 const Calibration = () => import('@/views/calibration/index.vue')
 const Transmission = () => import('@/views/transmission/index.vue')
 const Power = () => import('@/views/power/index.vue')
@@ -28,6 +29,7 @@ const router = createRouter({
     { path: '/sensor', name: 'sensor', component: Sensor },
     { path: '/observation', name: 'observation', component: Observation },
     { path: '/quality', name: 'quality', component: Quality },
+    { path: '/quality/:id', name: 'quality-detail', component: QualityDetail },
     { path: '/calibration', name: 'calibration', component: Calibration },
     { path: '/transmission', name: 'transmission', component: Transmission },
     { path: '/power', name: 'power', component: Power },

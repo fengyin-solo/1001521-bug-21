@@ -12,7 +12,7 @@ router = APIRouter(prefix="/api/quality", tags=["数据质控"])
 
 service = QualityService()
 
-LIST_FIELDS = ["质控编号", "质控时段", "涉及站点", "质控规则", "检出疑误数", "质控人员", "质控日期", "质控状态"]
+LIST_FIELDS = ["质控编号", "质控时段", "涉及站点", "质控规则", "检出疑误数", "当前轮次", "质控人员", "质控日期", "质控状态"]
 STATUSES = ["待执行", "执行中", "已完成", "已退回"]
 
 
@@ -30,9 +30,22 @@ def list_entries(
     return PageResult(items=items, total=total, page=page, size=size)
 
 
+@router.get("/stats")
+def stats() -> dict[str, Any]:
+    """页脚统计卡片：与列表同一份数据实时汇总，刷新后统计与列表保持一致。"""
+    return {"items": service.stats()}
+
+
+@router.get("/export")
+def export_entries() -> dict[str, Any]:
+    """导出数据质控清单：返回当前过滤条件下的全量数据。"""
+    items, total = service.list_entries(page=1, size=10000)
+    return {"module": "quality", "total": total, "items": items}
+
+
 @router.get("/{entry_id}", response_model=dict)
 def get_entry(entry_id: int) -> dict:
-    """读取单条质控任务明细；不存在时给出可读的错误说明。"""
+    """读取单条质控任务明细（含每一轮质控记录）；不存在时给出可读的错误说明。"""
     entry = service.get_entry(entry_id)
     if entry is None:
         raise HTTPException(status_code=404, detail=f"质控任务 {entry_id} 不存在或已归档")
@@ -52,14 +65,7 @@ def create_entry(payload: EntryPayload) -> ActionResult:
 def run_action(entry_id: int, payload: EntryPayload) -> ActionResult:
     """对单条质控任务执行启动质控、确认完成、退回重做；不允许的动作会被拦下并说明原因。"""
     action = str(payload.values.get("action") or "").strip()
-    entry, message = service.run_action(entry_id, action)
+    entry, message = service.run_action(entry_id, action, payload.values)
     if entry is None:
         return ActionResult(ok=False, message=message)
     return ActionResult(ok=True, message=message, entry=entry)
-
-
-@router.get("/export")
-def export_entries() -> dict[str, Any]:
-    """导出数据质控清单：返回当前过滤条件下的全量数据。"""
-    items, total = service.list_entries(page=1, size=10000)
-    return {"module": "quality", "total": total, "items": items}

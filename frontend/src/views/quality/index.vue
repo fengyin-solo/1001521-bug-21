@@ -57,6 +57,7 @@
 
     <footer class="page-foot">
       <span>共 {{ total }} 条数据质控记录</span>
+      <span v-if="noticeMessage" class="notice-text">{{ noticeMessage }}</span>
       <span v-if="errorMessage" class="error-text">{{ errorMessage }}</span>
     </footer>
   </section>
@@ -64,20 +65,27 @@
 
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 
 import { request } from '@/api/client'
 
 type Row = Record<string, string | number | null>
 
 const ENDPOINT = '/api/quality'
-const columns = ["质控编号", "质控时段", "涉及站点", "质控规则", "检出疑误数", "质控人员", "质控日期", "质控状态"]
-const actions = ["启动质控", "确认完成", "退回重做"]
-const statuses = ["待执行", "执行中", "已完成", "已退回"]
-const stats = [{"label": "待执行质控", "value": 0}, {"label": "本月质控轮次", "value": 0}, {"label": "检出疑误数", "value": 0}]
+const columns = ["质控编号", "质控时段", "涉及站点", "质控规则", "检出疑误数", "当前轮次", "质控人员", "质控日期", "质控状态"]
+const actions = ["启动质控", "确认完成", "退回重做", "详情"]
+
+const router = useRouter()
 
 const rows = ref<Row[]>([])
 const total = ref(0)
+const stats = ref<Array<{ label: string; value: number }>>([
+  { label: '待执行质控', value: 0 },
+  { label: '本月质控轮次', value: 0 },
+  { label: '检出疑误数', value: 0 },
+])
 const errorMessage = ref('')
+const noticeMessage = ref('')
 const filters = ref<Record<string, string>>({})
 const filterFields = columns.slice(0, 3)
 
@@ -90,20 +98,73 @@ function exportRows() {
   window.open(`${ENDPOINT}/export`, '_blank')
 }
 
-function openCreate() {
-  errorMessage.value = '质控任务登记入口尚未接入审批流'
+async function openCreate() {
+  errorMessage.value = ''
+  noticeMessage.value = ''
+  const values: Record<string, string> = {}
+  for (const field of ['质控编号', '质控时段', '涉及站点']) {
+    const input = window.prompt(`请输入${field}（必填）`)
+    if (input === null) {
+      return
+    }
+    values[field] = input.trim()
+  }
+  try {
+    const response = await request(ENDPOINT, {
+      method: 'POST',
+      body: JSON.stringify({ values }),
+    })
+    const payload = await response.json()
+    if (!response.ok || !payload.ok) {
+      throw new Error(payload.message || '质控任务登记未生效，请检查后重试')
+    }
+    noticeMessage.value = payload.message || '质控任务已登记'
+    await reload()
+  } catch (error) {
+    errorMessage.value = error instanceof Error ? error.message : '质控任务登记失败'
+  }
 }
 
 async function runAction(action: string, row: Row) {
   errorMessage.value = ''
+  noticeMessage.value = ''
+  if (action === '详情') {
+    await router.push(`/quality/${row.id}`)
+    return
+  }
+  const values: Record<string, string> = { action }
+  if (action === '退回重做') {
+    const reason = window.prompt('请输入退回原因（必填）')
+    if (reason === null) {
+      return
+    }
+    if (!reason.trim()) {
+      errorMessage.value = '退回原因不能为空'
+      return
+    }
+    values['退回原因'] = reason.trim()
+  }
+  if (action === '确认完成') {
+    const count = window.prompt('请输入本轮检出疑误数', '0')
+    if (count === null) {
+      return
+    }
+    if (!/^\d+$/.test(count.trim())) {
+      errorMessage.value = '检出疑误数必须是非负整数'
+      return
+    }
+    values['检出疑误数'] = count.trim()
+  }
   try {
     const response = await request(`${ENDPOINT}/${row.id}/actions`, {
       method: 'POST',
-      body: JSON.stringify({ action }),
+      body: JSON.stringify({ values }),
     })
-    if (!response.ok) {
-      throw new Error('数据质控动作未生效，请稍后重试')
+    const payload = await response.json()
+    if (!response.ok || !payload.ok) {
+      throw new Error(payload.message || '数据质控动作未生效，请稍后重试')
     }
+    noticeMessage.value = payload.message || `质控任务已${action}`
     await reload()
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '数据质控操作失败'
@@ -114,13 +175,20 @@ async function reload() {
   errorMessage.value = ''
   const query = new URLSearchParams(filters.value as Record<string, string>).toString()
   try {
-    const response = await request(`${ENDPOINT}?${query}`)
-    if (!response.ok) {
+    const [listResponse, statsResponse] = await Promise.all([
+      request(`${ENDPOINT}?${query}`),
+      request(`${ENDPOINT}/stats`),
+    ])
+    if (!listResponse.ok) {
       throw new Error('质控任务列表读取失败')
     }
-    const payload = await response.json()
+    const payload = await listResponse.json()
     rows.value = payload.items ?? []
     total.value = payload.total ?? rows.value.length
+    if (statsResponse.ok) {
+      const statsPayload = await statsResponse.json()
+      stats.value = statsPayload.items ?? stats.value
+    }
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '数据质控列表读取失败'
   }
